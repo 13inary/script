@@ -1,0 +1,184 @@
+#!/bin/bash
+num=1
+tmpFile="/tmp/ydTranslateDict.tmp"
+aEnable=false
+bEnable=false
+circulateyd=false
+ 
+if [ $# -lt "$num" ] 
+then
+	echo "Usage:$(basename $0) [-a] [-b] [-h]"
+	exit 1
+fi
+ 
+#处理参数
+while getopts :abch theArgument
+do
+	case $theArgument in
+		a)
+			aEnable=true
+			#echo $OPTARG
+			;;
+		b)
+			bEnable=true
+			#echo $OPTARG
+			;;
+		c)
+			circulateyd=true
+			#echo $OPTARG
+			;;
+		h)
+			echo -e " -a aaa\n -b bbb\n -h hhh\n" 
+			#echo $OPTARG		
+			;;
+		?)
+			echo "argument error"
+			exit 1
+			;;
+	esac
+done
+shift $(($OPTIND-1)) # 跳过argument参数，提取想要搜索的内容
+#echo $*
+
+
+# circulate
+circulateStatus=true
+while $circulateStatus; do
+if [ $circulateyd == false ] ; then
+	circulateStatus=false
+	searchWord=$*
+else
+	read -p "yd>" searchWord
+fi
+
+# end circulate
+if [ "$searchWord" == "ENDYD" ] ; then
+	break
+fi
+
+
+# 用+或者%20代表url中的空格
+#searchWord=${searchWord// /%20} # 把所有空格替换成%20。
+searchWord=${searchWord// /+}
+# 抓取页面、删除html代码、空行……提取目标内容
+curl -s 'http://dict.youdao.com/search?q='$searchWord'' |
+       	awk 'BEGIN{j=0;i=0;} {if(/phrsListTab/){i++;} if(i==1){print $0; if(/<\/ul>/){i=0;}} if(/collinsToggle/){j++;} if(j==1){print $0; if(/<\/ul>/){j=0;}}}' |
+       	sed 's/<[^>]*>//g' | sed 's/→//g' | sed 's/^\s*//g' | sed 's/^[.*]$//g'|
+	sed '/^美$/,+1d' | sed '/^英$/,+1d' | #删除美开头和结束的行和其下一行
+       	sed 's/\]/qqqqq/g' | sed 's/\[/bbbbb/g' | sed 's/bbbbb.*qqqqq//g' | 
+
+	sed 's/&nbsp;//g' | #删除&nbsp;
+	sed 's/\;/\\\\033[35;1m,\\\\033[0m/g' | #替换;成,
+
+	sed 's/；/\\\\033[35;1m,\\\\033[0m/g' | #替换；成,
+	sed 's/^v\./\\\\n   -\\\\033[31;1mv\\\\033[0m\./g' |
+	sed 's/^vt\./\\\\n   -\\\\033[31;1mvt\\\\033[0m\./g' |
+	sed 's/^vi\./\\\\n   -\\\\033[31;1mvi\\\\033[0m\./g' |
+	sed 's/^n\./\\\\n   -\\\\033[32;1mn\\\\033[0m\./g' |
+	sed 's/^adj\./\\\\n   -\\\\033[34;1madj\\\\033[0m\./g' |
+	sed 's/^adv\./\\\\n   -\\\\033[36;1madv\\\\033[0m\./g' |
+	sed 's/^prep\./\\\\n   -\\\\033[35;1mprep\\\\033[0m\./g' |
+	sed 's/^conj\./\\\\n   -\\\\033[33;1mconj\\\\033[0m\./g' |
+
+	sed 's/^pron\./\\\\n   -\\\\033[35;0mpron\\\\033[0m\./g' |
+	sed 's/^abbr\./\\\\n   -\\\\033[35;0mabbr\\\\033[0m\./g' |
+	sed 's/^art\./\\\\n   -\\\\033[35;0mart\\\\033[0m\./g' |
+	sed 's/^num\./\\\\n   -\\\\033[35;0mnum\\\\033[0m\./g' |
+	sed 's/^int\./\\\\n   -\\\\033[35;0mint\\\\033[0m\./g' |
+
+	sed 's/^misc\.$/\\\\n\\\\033[36;1mmisc\\\\033[0m\./g' |
+	sed 's/^($/\\\\n(/g' |
+
+	sed  '$!N;/\/.*\//!P;D' | #删除/……/行及其上一行
+	sed '/^CET4 TEM4$/d' | #删除CET4 TEM4行
+	sed '/^TEM4$/d' |
+	sed '/^CET4$/d' |
+	sed '/^CET6+ TEM8$/d' |
+	sed '/^CET6 TEM8$/d' |
+	sed '/^CET6 TEM4$/d' |
+	sed '/^CET4 TEM8$/d' |
+
+       	sed '/^$/d' > $tmpFile
+
+#cat $tmpFile
+#echo ------------------------------------------------------
+
+# 处理输出
+wordFlase=true
+orHead=true # 当前读入是否属于“头部”
+head="" # 词性
+body="" # 词语解释|词语例句
+ex=false # 表示当前在解释块
+eg=false # 表示当前在例句块
+exRow=-1 # 解释的第几行
+egRow=-1 # 例句的第几行
+while read line
+do
+
+	if $wordFlase ; then
+		wordFlase=false
+		line="\033[33;1m$line\033[0m"
+	fi
+
+	exFlag=$(echo "$line" | awk '/[0-9]\./')
+	if [ "$exFlag" != "" ]; then #遇到'数字+点'开头的行\$表示空格
+		orHead=false #遇见数字行，将头部标示设置为false
+		ex=true
+		exRow=0
+		eg=false
+	fi
+
+	egFlag=$(echo "$line" | awk '/例：/') #遇到'例：'开头的行
+	if [ "$egFlag" != "" ]; then
+		orHead=false
+		eg=true
+		egRow=0
+		ex=false
+	fi
+ 
+	if $orHead ; then
+		head="$head $line"
+	else 
+		if $ex && $aEnable ; then
+			if [ $exRow == 0 ] ; then 
+				line="\n\033[32;1m$line\033[0m" # 释义编号
+				let exRow++
+			elif [ $exRow == 1 ] ; then 
+				line="\033[36;1m[$line]\033[0m" # 词性
+				let exRow++
+			elif [ $exRow == 2 ] ; then 
+				line="\033[34;1m$line\033[0m" # 释义
+				let exRow++
+			fi
+			body="$body $line"
+		fi
+
+		if $eg && $bEnable ; then
+			if [ $egRow == 0 ] ; then 
+				line="\n\033[31m$line\033[0m" # 例：
+				let egRow++
+			elif [ $egRow == 1 ]; then 
+				line="\033[33m$line\033[0m" # 例句 
+				let egRow++
+			elif [ $egRow == 2 ]; then 
+				line="$line" # 例句释义 
+				let egRow++
+			fi
+			body="$body $line"
+		fi
+	fi
+done < $tmpFile
+
+#echo $head
+#echo ---------
+if [ "$head" == "" ]; then
+        echo -e "\033[31;1m"input error"\033[0m"
+else
+       	echo -e "$head$body" #\033[31;1m$head\033[0m红色
+fi
+#echo ----------------------------------------------
+
+
+done
+
+exit 0

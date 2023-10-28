@@ -1,0 +1,5 @@
+#!/bin/bash
+
+#echo "_$(date -I)_$(date +%a_%H:%M:%S)"
+
+echo `date +-%Y_%m_%d-%a-%H_%M_%S`
